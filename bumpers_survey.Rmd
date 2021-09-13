@@ -1,0 +1,679 @@
+---
+title: "Bumpers 18 month Survey Results"
+output: html_document
+---
+
+```{r setup, include=FALSE, cache = FALSE}
+
+library(data.table)
+library(ggplot2)
+library(readxl)
+library(wordcloud)
+library(RColorBrewer)
+library(tm)
+library(magrittr)
+library(kableExtra)
+library(stringr)
+library(shiny)
+library(packcircles)
+
+# load data
+
+data = read_xlsx('March 2020 Bumpers 18-month Checkin (Responses).xlsx')
+
+setDT(data)
+
+
+setnames(data, c("What is your gender?", "How old are you?",  "What was your baby's first word?", "What is baby's favorite book at the moment?",
+                 "Which of these things has baby started doing?","How often do you enjoy being a parent?",
+                 "What part of parenthood brings you the most joy?",  "What makes you most anxious?",
+                 "If applicable, what overwhelms you most?",
+                 "How many teeth does baby have?", "What is baby's favorite food?", 
+                 "How often per day does your baby nurse?", "What is your family income?", 
+                 
+                 "What kind of childcare do you use most often?"  ,
+                 "How much do you spend on childcare each month?" , "How many kids do you have?" ,
+                 "How many solid meals or snacks do they get each day?",    'How often are mealtimes with baby stressful?' ,
+                 "What are you most looking forward to in the next year?"),
+         c('gender', 'age', 'first_word', 'favorite_book','milestones', 'how_often_enjoy_parenting',
+           'most_joy_parenting' ,
+           'what_most_anxious', 'what_most_overwhelmed', 'teeth', 'favorite_food',
+           'how_often_nurse', 'hh_income',
+           'childcare_used',
+           'childcare_spend', 'n_kids', 'n_meals','feeding_stress' , 'looking_forward'
+           ), skip_absent = TRUE)
+
+
+```
+
+Here are some selected survey results from the recent 18-month surveys! Thanks to those who participated -- it's so fun to see how our now-toddlers are progressing (doesn't it feel like we were flooded with birth announcements not so long ago?)
+
+_Note: NA answers are removed from totals. These answers are not de-duplicated, so multiple parents might have answered for the same child (and in some cases a parent answered once for multiple Marchling twins)._
+
+## Who took the survey?
+
+There were `r data[, .N]` responses, `r data[!is.na(age), .N]` of whom answered the first question.
+
+**Gender identity:**
+`r round(data[gender == 'Female', .N]/data[!is.na(gender), .N]*100, 0)` percent of survey-takers identify as women, and `r round(data[gender == 'Male', .N]/data[!is.na(gender), .N]*100, 0)` percent identify as men, while `r round(data[gender == 'Other', .N]/data[!is.na(gender), .N]*100, 0)` percent identify as another gender.
+
+**Age:**
+The maximum age of  survey-takers is `r data[, max(age, na.rm = TRUE)]`  and the minimum age is  `r data[, min(age, na.rm = TRUE)]`.
+
+```{r age_plot, echo = FALSE, message=FALSE,warning=FALSE}
+
+ggplot(data, aes(x = age, fill = gender)) + geom_histogram(color = 'white', binwidth = 1) + scale_fill_manual(values = c('#F1C40F',  '#eb0450', '#3fc9a2')) + theme_bw() + ggtitle('Age by gender')
+
+
+```
+
+**Number of kids:**
+
+`r round(data[n_kids == 1, .N]/data[!is.na(n_kids), .N]*100, 0)` percent of survey-takers have just one kid!
+
+
+```{r num_kids, echo = FALSE, warning=FALSE, message=FALSE}
+ggplot(data, aes(x = n_kids)) + geom_histogram(color = 'white', fill = '#eb0450', binwidth = 1) + theme_bw() +xlab('Number of kids') + 
+  ylab('N')
+
+```
+
+
+**Enjoyment of parenting**
+
+The majority of parents who took the survey enjoy parenting quite a lot, while some might be struggling right now and looking forward to future parenting horizons. No survey taker answered less than 2 on a scale of 1-5.
+
+
+```{r  echo = FALSE, warning=FALSE, message=FALSE}
+
+enjoy_parenting = data[, .N, how_often_enjoy_parenting]
+enjoy_parenting[is.na(how_often_enjoy_parenting), `:=` (how_often_enjoy_parenting = 1, N = 0)]
+ggplot(enjoy_parenting, aes(x = how_often_enjoy_parenting, y = N)) + geom_bar(color = 'white', fill = '#eb0450', stat = 'identity') + theme_bw() +xlab('How often we enjoy parenting')
+
+```
+
+
+```{r wrangling, echo = FALSE}
+
+# Group favorite activity
+activity = data[, .N, .(favorite_activity  = `What is baby's favorite activity?`)
+                ]
+
+
+activity[grep(paste(c('rucks', 'Blocks', 'Puzzle', 'gadget'),collapse="|"), 
+                        favorite_activity), favorite_activity_grouped := 'Toys, puzzles, gadgets']
+activity[grep(paste(c('Mayhem', 'Tearing', 'maniac'),collapse="|"), 
+                        favorite_activity), favorite_activity_grouped := 'Causing mayhem']
+activity[grep(paste(c('playground'),collapse="|"), 
+                        favorite_activity), favorite_activity_grouped := 'Outdoor play']
+
+
+activity[favorite_activity %in% c('Outdoor play', 'Reading'), favorite_activity_grouped := favorite_activity]
+
+activity[favorite_activity %in% c('Singing', 'Music/dancing', 'Dancing'), favorite_activity_grouped := 'Singing & dancing']
+
+activity[is.na(favorite_activity_grouped) & !is.na(favorite_activity), favorite_activity_grouped := 'Siblings & general play']
+activity[, favorite_activity_grouped := as.factor(favorite_activity_grouped)]
+
+activity = activity[!is.na(favorite_activity)]
+
+# Group traits
+
+data[, favorite_trait := `Which of baby's traits is your favorite?`]
+traits = data[, .N, .(favorite_trait = `Which of baby's traits is your favorite?`)]
+
+traits[grep(paste(c('laugh', 'smile', 'giggle'),collapse="|"),
+            tolower(favorite_trait)), 
+       favorite_trait_grouped := "Smile/laugh" ]
+
+traits[grep(paste(c('happ*', 'cheer', 'good mood', 'smiley', 'exuber', 'joy', 'playful', 'personality', 'jolly'),collapse="|"), 
+            tolower(favorite_trait)), 
+       favorite_trait_grouped := "Cheerfulness" ]
+
+traits[grep(paste(c('sill*', 'humor', 'humour', 'cheeki', 'grin', 'fun loving', 'funny','mischievous'),collapse="|"), 
+            tolower(favorite_trait)), 
+       favorite_trait_grouped := "Silliness/humor/mischief" ]
+
+traits[grep(paste(c('curious', 'curios*', 'inquis*', 'intelligence', 'investig*', 'clever', 'imagination', 'vocabulary'),collapse="|"), 
+            tolower(favorite_trait)), 
+       favorite_trait_grouped := "Curiosity & cleverness" ]
+                        
+traits[grep(paste(c('adorable', 'hand dimples', 'tush', 'walk', 'eyes', 'nose', 'singing voice'),collapse="|"), 
+            tolower(favorite_trait)), 
+       favorite_trait_grouped := "General adorableness" ]
+                        
+traits[grep(paste(c('gentle', 'kind', 'easy going', 'sweet', 'go with anyone', 'affectionate', 'good natured', 'reasonable', 'character', 'thoughtful', 'helpful'),collapse="|"), 
+                        tolower(favorite_trait)), favorite_trait_grouped := "Kind/affectionate" ]
+
+traits[grep(paste(c('social', 'people person', 'talk', 'babbl*', 'chat', 'sociable', 'outgoing'),collapse="|"),
+            tolower(favorite_trait)), 
+       favorite_trait_grouped := "Sociable/talker" ]
+
+traits[grep(paste(c('independ*'),collapse="|"), 
+                        tolower(favorite_trait)), favorite_trait_grouped := "Independence"]
+traits[grep(paste(c('danc*', 'runs and flops', 'run*', 'excite', 'snakes','adventure'),collapse="|"), 
+                        tolower(favorite_trait)), favorite_trait_grouped := "Playfulness & adventure"]
+
+traits[grep(paste(c('determin*', 'perseverance',  'fearless'),collapse="|"), 
+                        tolower(favorite_trait)), favorite_trait_grouped := "Playfulness & adventure"]
+
+traits = traits[!is.na(favorite_trait), .(N = sum(N)), favorite_trait_grouped]
+
+
+# Milestones
+s = strsplit(data$milestones, split = ",")
+milestones = data.table(milestone = unlist(s))[!is.na(milestone)]
+milestones[, milestone := trimws(milestone)]
+
+```
+
+
+## All about the Marchlings
+
+The toddlers in the group have a ton of personality, and we see them shine in all different ways!
+
+
+**Our favorite Marchling traits**
+
+
+```{r echo = FALSE}
+
+# kable(traits[!is.na(favorite_trait_grouped), 
+#              .("Favorite trait" = favorite_trait_grouped, N, Percent = paste0(round(N/data[!is.na(favorite_trait), .N] * 100, 0), '%'))][order(-N)]) %>% kable_paper(full_width = FALSE)
+
+
+
+pal = c('#5f7f8a', '#eb0450', '#F1C40F', '#3fc9a2', '#87ceeb', '#ed7b9f',"#a93c9f", "#c5ae91", "#e17e45", '#ffa6a2')
+traits[favorite_trait_grouped == 'General adorableness', favorite_trait_grouped := 'General\nadorableness']
+traits[favorite_trait_grouped == 'Silliness/humor/mischief', favorite_trait_grouped := 'Silliness/humor/\nmischief']
+traits[favorite_trait_grouped == 'Playfulness & adventure', favorite_trait_grouped := 'Playfulness &\nadventure']
+traits[favorite_trait_grouped == 'Curiosity & cleverness', favorite_trait_grouped := 'Curiosity &\ncleverness']
+
+
+p = circleProgressiveLayout(traits, sizecol = 'N', sizetype = 'area')
+
+p = cbind(p, traits)
+limits <- c(-40, 50)
+inset <- diff(limits) / 3
+res = circleRepelLayout(p, xlim = limits, ylim = limits)
+res$layout$radius = 2.3*res$layout$radius
+
+# fiddle with specific circles....
+res$layout[8, 1] = 1.9
+res$layout[7, 1] = -1.23
+p[8, 1] = 1.9
+p[7,1] = -1.23
+d = circleLayoutVertices(res$layout, sizetype = "radius")
+
+p$label = paste0(p$favorite_trait_grouped, '\n', '(', p$N, ')')
+
+ggplot(d, aes(x, y)) + 
+  geom_polygon(aes(group = id, fill = as.factor(id)), 
+                show.legend = FALSE) +
+  geom_text(data = p, aes(x, y), label = p$label) +
+  scale_fill_manual(values = pal) +
+  theme_void()
+```
+
+
+
+**Our Marchlings' favorite activities**
+
+Playtime takes on a variety of modes, including a lot of playing with siblings.
+
+
+```{r echo = FALSE}
+# kable(traits[!is.na(favorite_trait_grouped), 
+#              .("Favorite trait" = favorite_trait_grouped, N, Percent = paste0(round(N/data[!is.na(favorite_trait), .N] * 100, 0), '%'))][order(-N)]) %>% kable_paper(full_width = FALSE)
+activity = activity[, .(N = sum(N)), favorite_activity_grouped]
+
+activity[, favorite_activity_grouped := str_wrap(favorite_activity_grouped, width = 14)]
+activity[favorite_activity_grouped == 'Causing mayhem', favorite_activity_grouped := 'Causing\nmayhem']
+p = circleProgressiveLayout(activity, sizecol = 'N', sizetype = 'area')
+
+p = cbind(p, activity)
+limits <- c(-10, 10)
+inset <- diff(limits) / 2.5
+res = circleRepelLayout(p, xlim = limits, ylim = limits)
+d = circleLayoutVertices(p, sizetype = "radius")
+
+p$label = paste0(p$favorite_activity_grouped, '\n', '(', p$N, ')')
+
+ggplot(d, aes(x, y)) + 
+  geom_polygon(aes(group = id, fill = as.factor(id)), 
+                show.legend = FALSE) +
+  geom_text(data = p, aes(x, y), label = p$label) +
+  scale_fill_manual(values = pal) +
+  theme_void()
+```
+
+**Favorite toys** 
+
+Marchlings gravitate towards cars and stuffed toys, with a healthy dose of books!
+
+
+```{r text, echo = FALSE, message = FALSE, warning=FALSE}
+
+toys = data$`What is baby's favorite toy at the moment?`
+toys = toys[!is.na(toys)]
+
+toys[toys == 'Booooook'] =  'book'
+toys[toys %like% 'book'] = 'book'
+
+
+word_cloud_prep = function(text){ 
+  docs = Corpus(VectorSource(text))
+  docs = docs %>%
+    tm_map(removeNumbers) %>%
+    tm_map(removePunctuation) %>%
+    tm_map(stripWhitespace)
+  docs = tm_map(docs, content_transformer(tolower))
+  docs = tm_map(docs, removeWords, stopwords("english"))
+
+  dtm = TermDocumentMatrix(docs) 
+  matrix = as.matrix(dtm) 
+  words = sort(rowSums(matrix),decreasing=TRUE) 
+  df = data.frame(word = names(words),freq=words)
+  return(df)
+}
+
+toys_df = word_cloud_prep(toys)
+
+set.seed(413)
+toy_wordcloud = wordcloud(words = toys_df$word, freq = toys_df$freq, 
+          min.freq = 1,           
+          max.words=200, 
+          random.order=FALSE, 
+          rot.per=0.2,            
+          colors=pal)
+
+
+
+```
+
+**How many teeth?**
+
+OK, it turns out a lot of us don't really know how many teeth our kid has, and we're not willing to stick our fingers in to find out. The lowest number of teeth reported was 2, and 18 was on the high end! Several babies have all the baby teeth they'll need for the next few years, and for many, the fun is still to come...
+
+**Milestones**
+
+Of those who entered one or more milestones, around a quarter of Marchlings are already jumping! It's always good to remember that "March Bumpers" includes a wide range of ages & milestone achievements come in so many forms.
+
+```{r echo = FALSE}
+
+kable(milestones[, .(.N, Percent = paste0(round(.N/data[!is.na(milestone), .N]  * 100, 0), '%')), milestone] %>%
+        .[order(-N)])  %>%
+        kable_paper(full_width = FALSE)
+
+```
+
+Some of our toddlers are hitting quite a few of the milestones listed, while most are somewhere in the middle -- and we're all waiting to see what they get into next...
+
+```{r echo = FALSE} 
+
+data[, milestones_hit := str_count(milestones, pattern = ',')]
+
+ggplot(data[!is.na(milestones)], aes(x = milestones_hit)) + 
+  geom_bar(aes(y = (..count..)/sum(..count..) * 100), 
+           fill =  '#eb0450', color = 'white') +
+  theme_bw() + 
+  xlab('Number of listed milestones hit') + 
+  ylab('Percent of responses')
+
+```
+
+
+
+```{r  echo = FALSE, include = FALSE}
+# First word
+data[, first_word_orig := first_word]
+data[first_word_orig == 'Dad', first_word := 'Dada']
+data[first_word_orig %like% 'Car', first_word := 'Car']
+data[tolower(first_word_orig) %like% 'kitty', first_word := 'Cat']
+data[first_word_orig %like% 'cat', first_word := 'Cat']
+data[first_word_orig %like% "’s name" | first_word_orig %like% "'s name" |
+       first_word_orig %like% "our cat" 
+     , first_word := "Pet's name"]
+data[first_word_orig %like% "Dada", first_word := "Dada"]
+data[first_word_orig %like% "Da-da", first_word := "Dada"]
+data[first_word_orig %like% "Daddy", first_word := "Dada"]
+data[first_word_orig %like% "mama", first_word := "Mama"]
+data[first_word_orig %like% "Mum", first_word := "Mama"]
+data[first_word_orig %in% c('banana', 'Chips', 'melon'), first_word := "Food-related"]
+data[first_word_orig %like% "No true" | first_word_orig %like% "None yet"  | first_word_orig %like% 'Still waiting', first_word := "No words yet!"]
+
+first_words = data[!is.na(first_word), .N, first_word][order(-N)][N>=2]
+first_words[first_word == 'Cat', first_word := 'Cat/kitty']
+first_words[first_word == 'Mama', first_word := 'Mama/mum']
+first_words[first_word == 'Dada', first_word := 'Dad/dada']
+setnames(first_words, 'first_word', 'First word')
+```
+
+```{r include = FALSE, echo = FALSE}
+
+
+data[, favorite_food_orig := favorite_food]
+data[tolower(favorite_food) %like% 'raspber*', favorite_food := 'Raspberries']
+data[tolower(favorite_food) %like% 'blueberr*', favorite_food := 'Blueberries']
+data[tolower(favorite_food) %like% '"pasta"', favorite_food := 'Pasta']
+data[tolower(favorite_food) %like% 'legume*', favorite_food := 'Beans/legumes']
+data[tolower(favorite_food) %like% 'bean*', favorite_food := 'Beans/legumes']
+data[tolower(favorite_food) %like% 'cheese', favorite_food := 'Cheese']
+data[tolower(favorite_food) %like% 'fruit*', favorite_food := 'Fruit']
+data[tolower(favorite_food) %like% 'oatmea*', favorite_food := 'Oatmeal']
+
+favorite_food = data[!is.na(favorite_food), .N, favorite_food][N>=2][order(-N)]
+
+data[tolower(favorite_book) %like% 'brown bear', favorite_book := 'Brown Bear, Brown Bear']
+```
+
+**First Words**
+
+Some Marchlings communicate using sign language or other means, while many kids started talking with mom/dad equivalents -- animals and pet names are also popular first words!
+
+```{r echo = FALSE}
+kable(first_words[, .(`First word`, N, Percent = paste0(round(N/sum(N) * 100,0), '%'))]) %>% kable_paper(full_width = FALSE)
+```
+
+**Favorite Books**
+
+These little ones love their books -- over 100 distinct books were mentioned! Here are those that got more than one favorite (and some kids just like 'em all!)
+
+`r kable(data[!is.na(favorite_book),.N, .("Favorite book" = str_to_title(tolower(favorite_book)))][order(-N)][N>1]) %>% kable_paper(full_width=FALSE)`
+
+## Food, food, food
+
+Our babies started out with a mix of feeding strategies (nursing, formula, pumping, all of the above...) -- and now they're eating food along with us. Twenty-five percent of Marchlings in the survey still nurse sometimes, in varying amounts!
+
+```{r echo = FALSE,, warning = FALSE, message = FALSE}
+nursing = data[!is.na(how_often_nurse), .( 
+                                          "Percent of total" = paste0(round(.N/data[!is.na(how_often_nurse), .N] * 100, 0), '%'), 
+                                          "Percent of those who nurse" = paste0(round(.N/data[as.numeric(how_often_nurse)>0, .N]* 100,0), '%'), Count = .N), .("Times per day nursing" = how_often_nurse)][order(`Times per day nursing`)]
+
+nursing2 = data[!is.na(how_often_nurse), .(pct = round(.N/data[!is.na(how_often_nurse), .N] * 100, 0), 
+                                          pct2 = round(.N/data[as.numeric(how_often_nurse)>0, .N]* 100,0)), .(how_often_nurse)]
+nursing2[how_often_nurse == 0, pct2 := NA]
+
+nursing2 = melt(nursing2, id.vars = 'how_often_nurse')
+
+nursing[`Times per day nursing` == 0, `Percent of those who nurse` := NA]
+
+# kable(nursing) %>% kable_paper(full_width  = FALSE)
+
+nursing2[, variable := as.factor(variable)]
+ggplot(data = nursing2, aes(x = as.factor(how_often_nurse), 
+                            fill = variable, y = value)) + 
+  geom_bar(stat = 'identity', position = 'dodge') +
+  scale_fill_manual(name = '', values = c('#F1C40F',  '#eb0450'), labels = c('Percent of total', 'Percent of those who nurse')) + 
+  xlab('Times per day nursing') + ylab('Percent') + theme_bw()
+```
+
+
+**Favorite Foods**
+
+Whether nursing or not, mealtimes play a big role in all of our lives. Below are Marchlings' favorite foods that had more than one vote -- yes, many of our kids like berries.
+
+`r kable(favorite_food[, .("Favorite food" = favorite_food, N)]) %>% kable_paper(full_width = FALSE)`
+
+**Mealtimes**
+
+Most of our toddlers eat 4-6 times per day. 
+
+```{r echo = FALSE, warning=FALSE, message=FALSE}
+
+ggplot(data[!is.na(n_meals)], aes(x  = as.factor(n_meals))) + geom_bar(aes(y = (..count..)/sum(..count..) * 100), 
+                                                                       fill =  '#eb0450', color = 'white') +
+  theme_bw() + xlab('Meals/snacks per day') + ylab('Percent of responses')
+
+```
+
+About 13% of survey takers reported that mealtimes were "somewhat" to "very" stressful.
+
+
+```{r include = FALSE, echo = FALSE}
+
+# Childcare
+s = strsplit(data$childcare_used, split = ",")
+childcare = data.table(childcare_used = unlist(s))[!is.na(childcare_used)]
+
+
+# income/childcare
+
+income_childcare = data[, .(childcare_used, childcare_spend, hh_income)]
+income_childcare[, childcare_spend_n := fcase(childcare_spend == '1-250', 125,
+                                              childcare_spend == '251-500', 375,
+                                              childcare_spend == '501-750', 625,
+                                              childcare_spend == '751-1000', 875,
+                                              childcare_spend == '1001-1250', 1125,
+                                              childcare_spend == '1251-1500', 1375,
+                                              childcare_spend == '1501-1750', 1625,
+                                              childcare_spend == '1751-2000', 1875,
+                                              childcare_spend == '2001+', 2500
+                                              )]
+
+
+income_childcare[, childcare_spend_n := fcase(childcare_spend == '1-250', 125,
+                                              childcare_spend == '251-500', 375,
+                                              childcare_spend == '501-750', 625,
+                                              childcare_spend == '751-1000', 875,
+                                              childcare_spend == '1001-1250', 1125,
+                                              childcare_spend == '1251-1500', 1375,
+                                              childcare_spend == '1501-1750', 1625,
+                                              childcare_spend == '1751-2000', 1875,
+                                              childcare_spend == '2001+', 2500
+                                              )]
+
+income_childcare[, hh_income_n := fcase(hh_income == '1-50k', 25000,
+                                              hh_income == '51-100k', 75000,
+                                              hh_income == '101-150k', 125000,
+                                              hh_income == '151-200k', 175000,
+                                              hh_income == '201-250k', 225000,
+                                              hh_income == '251-300k', 275000,
+                                              hh_income == '301k+', 350000)] 
+
+income_childcare[, hh_income := factor(hh_income, levels = c('1-50k','51-100k',  '101-150k', '151-200k', '201-250k',
+                                                                '251-300k', '301k+'))]
+
+childcare_pct_of_income = income_childcare[!is.na(hh_income_n), .(pct = mean((childcare_spend_n * 12)/hh_income_n,na.rm = TRUE), .N), by = .(hh_income, hh_income_n)][order(hh_income_n)]
+
+childcare_pct_income_plot = ggplot(childcare_pct_of_income, aes(x = hh_income, y = pct)) + geom_bar(stat = 'identity', fill = '#eb0450') +geom_text(aes(label = paste0('N = ',N)), vjust = -.3) + xlab('Approximate household income, USD') + ylab('Approximate percent of income spent on childcare') + theme_bw()
+
+childcare_cost_by_type = income_childcare[!is.na(childcare_used) & !is.na(childcare_spend_n), .(mean = mean(childcare_spend_n, na.rm = TRUE ), N = .N), childcare_used]
+
+childcare_cost_type_plot = ggplot(childcare_cost_by_type, aes(x = childcare_used, y = mean)) + 
+  geom_bar(stat = 'identity', fill = '#eb0450') +
+  geom_text(aes(label = paste0('N = ',N)), hjust = -.3) + 
+  ggtitle('Type of childcare used') + xlab('') + ylab('Average appx. amount spent per month on childcare, USD') + theme_bw() + coord_flip() + ylim(c(0, 2100))
+```
+
+## Childcare
+
+Childcare for our kids comes in all forms.
+
+`r kable(childcare[, .(.N, Percent = paste0(round(.N/data[!is.na(childcare_used), .N] *   100,0), '%')), .("Childcare used" = childcare_used)][order(-N)]) %>% kable_paper(full_width=FALSE)`
+
+
+Many of us  are also spending quite a bit of money on childcare! Home daycares and nannies/au pairs tend to cost the most, while some work from home/stay at home parents still have ample childcare costs. The average daycare cost is between $1,000 and $1,500 per month!
+
+```{r echo = FALSE, warning=FALSE, message=FALSE}
+childcare_cost_type_plot
+
+```
+
+The cost of childcare takes its toll differently on families with different resources. Paying for childcare on less than $50,000 income is incredibly challenging.
+
+```{r echo = FALSE, warning=FALSE, message=FALSE}
+childcare_pct_income_plot
+
+```
+
+
+## How we're feeling as parents
+
+It's true that parenting any toddler is both exhausting and rewarding. And, repeating it doesn't make it any less true -- parenting a toddler born at the beginning of a global pandemic brings a truly unique set of anxieties as well as sources of joy as we figure out how to introduce our kids to the world.
+
+**What is making us most anxious?**
+
+Yes, another word cloud -- this visualization makes it clear what's on our mind these days.
+
+```{r  echo = FALSE, warning=FALSE, message=FALSE}
+# data[, .N, how_often_anxious]
+# data[, .N, what_most_anxious]
+what_most_anxious = data$what_most_anxious
+anxious_df = word_cloud_prep(what_most_anxious)
+anxious_df = setDT(anxious_df)[!word %in% c('dont', 'going', 'will', "’m", "’s", "shes", 'los')]
+set.seed(413)
+anxiety_wordcloud = wordcloud(words = anxious_df$word, freq = anxious_df$freq, 
+          min.freq = 1,           
+          max.words=200, 
+          random.order=FALSE, 
+          rot.per=0.35,            
+          colors=pal)
+```
+
+
+**What overwhelms us the most?**
+
+Note the prominence of word "trying" here -- we are all trying to do so much, and we're all succeeding at _a lot_ -- it's important to give ourselves some grace when we can't do everything.
+
+```{r  echo = FALSE, warning =FALSE, message=FALSE}
+
+what_most_overwhelmed = data$what_most_overwhelmed
+overwhelmed_df = word_cloud_prep(what_most_overwhelmed)
+overwhelmed_df = setDT(overwhelmed_df)[!word %in% c('developmentwhat’s', "’s", "’m", "dayweekyear", "teethingfussiness")]
+set.seed(413)
+overwhelmed_wordcloud = wordcloud(words = overwhelmed_df$word, freq = overwhelmed_df$freq, 
+          min.freq = 1,           
+          max.words=200, 
+          random.order=FALSE, 
+          rot.per=0.35,            
+          colors=pal)
+
+```
+
+And yet -- there's so much to look forward to...
+
+```{r  echo = FALSE, warning =FALSE, message=FALSE}
+data[looking_forward %like% 'holidays', looking_forward := 'Spending more time with family']
+data[looking_forward %like% 'Tie between', looking_forward := 'Having another baby, Baby becoming more communicative']
+data[looking_forward %like% 'pregnant', looking_forward := 'Having another baby']
+data[looking_forward %like% 'More outings', looking_forward := 'More variety of activities with baby']
+data[looking_forward %like% 'activities', looking_forward := 'More variety of activities with baby']
+data[looking_forward %like% 'All of the above', looking_forward := NA]
+s = strsplit(data$looking_forward, split = ",")
+forward = data.table(looking_forward = unlist(s))[!is.na(looking_forward)]
+
+forward[, looking_forward := trimws(looking_forward)]
+forward = forward[!is.na(looking_forward) & looking_forward != '--']
+
+
+ggplot(forward, aes(x = as.factor(looking_forward)))+ 
+  geom_bar(aes(y = (..count..)/sum(..count..) * 100), 
+           fill =  '#eb0450', color = 'white') +
+  theme_bw() + ggtitle("What we're looking forward to") + xlab('') + ylab('Percent of responses') + coord_flip()
+```
+
+
+...and so much bringing us joy:
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+most_joy = data$most_joy_parenting
+joy_df = word_cloud_prep(most_joy)
+joy_df = setDT(joy_df)
+set.seed(413)
+joy_wordcloud = wordcloud(words = joy_df$word, freq = joy_df$freq, 
+          min.freq = 1,           
+          max.words=200, 
+          random.order=FALSE, 
+          rot.per=0.2,            
+          colors=pal)
+```
+
+
+
+`r cat('\n')`
+`r cat('\n')`
+
+**All in all, we have a great community of wonderfully unique toddlers who are all learning, growing, and showing us their personalities in new ways every day.** 
+
+
+## Bonus content
+
+The rest of the charts, sans commentary:
+
+```{r the_rest, echo = FALSE, warning = FALSE, message = FALSE, results = 'asis'}
+
+vars = setdiff(names(data), c('Timestamp', 'age', 'gender', "What is baby's favorite activity?", "Which of baby's traits is your favorite?","what_most_anxious", "what_most_overwhelmed",
+                              "What is baby's favorite toy at the moment?", "favorite_book", "first_word", 'milestones',
+                              'how_often_enjoy_parenting', 'teeth', 'favorite_food', 'feeding_stress', 
+                              "n_meals", 'hh_income', "childcare_used", "how_often_nurse",
+                              "childcare_spend", "n_kids", "favorite_trait", "looking_forward", "most_joy_parenting",
+                              "Anything else you'd like to share?", "milestones_hit", "favorite_food_orig", "first_word_orig", "What struggles do you have with baby at mealtime?" ,  "What familial traits does baby have?"   ))
+
+
+for(var in vars){
+  title = var
+  if(title == 'What percent of the childcare does your partner perform?'){
+    title = 'What percent of the childcare does your partner perform? (10 percent increments)'
+  } 
+  title = str_wrap(title, width = 70)
+  
+  # print(title)0IPP
+  if(data[, max(str_count(get(var), ","), na.rm = TRUE)] > 1) {
+    if(title == "Where have you ma  zxade friends with other parents?" ){
+      data[`Where have you made friends with other parents?` %like% '(facebook, slack, discord, etc.)', 
+         `Where have you made friends with other parents?` := 'This group & other March 2020 Bumpers platforms']
+    }
+    s = strsplit(data[[var]], split = ",")
+    dt = data.table(variable = unlist(s))[!is.na(variable)]
+    dt[, variable := trimws(variable)]
+    dt = dt[, .N, variable]
+    
+    dt[, variable := str_wrap(variable, width = 36 )]
+    dt = dt[!variable %like% 'etc']
+  } else if(data[, .N, by = .(get(var))][!is.na(get), max(N)] < 3){
+    dt = ''
+  } else {
+    
+    dt = data[!is.na(get(var)), .N, by = .(variable = get(var))]
+    
+    if(all(dt[, !is.na(as.integer(variable))])) {
+      dt$variable = as.integer(dt$variable)
+    } else {
+      dt[, variable := str_wrap(variable, width = 24)]
+    }
+    
+  }
+
+  
+  if(dt != '' & is.integer(dt$variable)){
+    chart = ggplot(dt, aes(x = variable, y = N)) + geom_bar(stat = 'identity',
+                                                                         fill =  '#eb0450', color = 'white') +
+      theme_bw() + xlab('') + ylab('Count of responses') + 
+      geom_text(aes(label = paste0('N = ',N)), vjust = -.3) + 
+      ggtitle(title)
+    
+    
+    cat('\n')
+    print(chart)
+    cat('\n')
+  } else if(dt != ''){
+
+    dt[N==1, variable := 'Other response']
+    dt = dt[, .(N = sum(N)), variable]
+    
+    chart = ggplot(dt, aes(x = variable, y = N)) + geom_bar(stat = 'identity',
+                                                                         fill =  '#eb0450', color = 'white') +
+      theme_bw() + xlab('') + ylab('Count of responses') + 
+      geom_text(aes(label = paste0('N = ',N)), hjust = .6) + 
+      coord_flip() + ggtitle(title)
+    
+    
+    cat('\n')
+    print(chart)
+    cat('\n')
+  }
+}
+
+```
+
